@@ -220,11 +220,11 @@
     position:absolute; left:50%; bottom:1rem; transform:translateX(-50%) translateZ(20px);
     background:color-mix(in srgb, var(--bg) 88%, transparent); border:1px solid var(--line);
     border-radius:20px; padding:.5rem 1rem; font-size:.78rem; color:var(--ink); cursor:pointer;
-    opacity:0; transition:opacity .25s ease, background-color .4s ease; z-index:2;
+    opacity:0; pointer-events:none; transition:opacity .25s ease, background-color .4s ease; z-index:2;
   }
   .portrait:hover .portrait-upload, .portrait:focus-within .portrait-upload,
-  .spotlight-art:hover .portrait-upload, .spotlight-art:focus-within .portrait-upload{ opacity:1; }
-  @media (max-width:600px){ .portrait-upload{ opacity:.85; } }
+  .spotlight-art:hover .portrait-upload, .spotlight-art:focus-within .portrait-upload{ opacity:1; pointer-events:auto; }
+  .portrait.show-upload .portrait-upload, .spotlight-art.show-upload .portrait-upload{ opacity:1; pointer-events:auto; }
   #portraitInput, #spotlightInput{ display:none; }
   #about h2{ font-size:clamp(1.9rem,3.4vw,2.5rem); font-weight:300; max-width:16ch; margin-bottom:1.5rem; }
   #about p{ color:var(--muted); max-width:56ch; margin-bottom:1.1rem; }
@@ -704,6 +704,26 @@
         card.style.transform = 'rotateY(' + rotY.toFixed(2) + 'deg) rotateX(' + rotX.toFixed(2) + 'deg) rotateZ(-2deg) scale(1.04)';
       });
       wrap.addEventListener('mouseleave', function(){ card.style.transform = ''; });
+    } else if (!reduced){
+      /* touch devices: drag a finger across the card to tilt it, tap to reveal the upload button */
+      wrap.addEventListener('touchmove', function(e){
+        if (!e.touches || !e.touches[0]) return;
+        var t = e.touches[0];
+        var rect = wrap.getBoundingClientRect();
+        var px = (t.clientX - rect.left) / rect.width;
+        var py = (t.clientY - rect.top) / rect.height;
+        var rotY = (px - 0.5) * 26 - 20;
+        var rotX = (0.5 - py) * 16 + 9;
+        card.style.transform = 'rotateY(' + rotY.toFixed(2) + 'deg) rotateX(' + rotX.toFixed(2) + 'deg) rotateZ(-2deg) scale(1.02)';
+      }, { passive:true });
+      wrap.addEventListener('touchend', function(){ card.style.transform = ''; });
+      wrap.addEventListener('click', function(e){
+        if (e.target.closest('.portrait-upload') || e.target.closest('input[type=file]')) return;
+        card.classList.toggle('show-upload');
+      });
+      document.addEventListener('click', function(e){
+        if (!wrap.contains(e.target)) card.classList.remove('show-upload');
+      });
     }
 
     var portraitInput = document.getElementById('portraitInput');
@@ -962,6 +982,26 @@
         spot.style.transform = 'rotateY(' + rotY.toFixed(2) + 'deg) rotateX(' + rotX.toFixed(2) + 'deg) rotateZ(1.5deg) scale(1.04)';
       });
       spotWrap.addEventListener('mouseleave', function(){ spot.style.transform = ''; });
+    } else if (!reduced){
+      /* touch devices: drag a finger across the card to tilt it, tap to reveal the upload button */
+      spotWrap.addEventListener('touchmove', function(e){
+        if (!e.touches || !e.touches[0]) return;
+        var t = e.touches[0];
+        var rect = spotWrap.getBoundingClientRect();
+        var px = (t.clientX - rect.left) / rect.width;
+        var py = (t.clientY - rect.top) / rect.height;
+        var rotY = (px - 0.5) * 24 + 16;
+        var rotX = (0.5 - py) * 16 + 8;
+        spot.style.transform = 'rotateY(' + rotY.toFixed(2) + 'deg) rotateX(' + rotX.toFixed(2) + 'deg) rotateZ(1.5deg) scale(1.02)';
+      }, { passive:true });
+      spotWrap.addEventListener('touchend', function(){ spot.style.transform = ''; });
+      spotWrap.addEventListener('click', function(e){
+        if (e.target.closest('.portrait-upload') || e.target.closest('input[type=file]')) return;
+        spot.classList.toggle('show-upload');
+      });
+      document.addEventListener('click', function(e){
+        if (!spotWrap.contains(e.target)) spot.classList.remove('show-upload');
+      });
     }
 
     var spotlightInput = document.getElementById('spotlightInput');
