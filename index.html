@@ -506,8 +506,9 @@
       <div class="carousel-actions owner-only">
         <button type="button" class="text-btn" id="carouselReplace">Replace this photo</button>
         <button type="button" class="text-btn" id="carouselAdd">+ Add artwork</button>
+        <button type="button" class="text-btn" id="carouselRemove" style="display:none;">Remove this artwork</button>
       </div>
-      <p class="upload-hint owner-only">Your changes save automatically in this browser, so they'll still be here next time you open this page on this device. <button type="button" class="text-btn" id="resetGallery" style="margin-left:.4rem;">Reset to defaults</button></p>
+      <p class="upload-hint owner-only">Your changes save automatically in this browser on this device. <button type="button" class="text-btn" id="resetGallery" style="margin-left:.4rem;">Reset to defaults</button></p>
     </div>
   </section>
 
@@ -625,11 +626,9 @@
   var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var root = document.documentElement;
 
-  /* ---- persistence: saves uploads/edits to this browser so they survive a refresh -----
-     Note: this only works once the page is actually opened as a real file/site in a normal
-     browser tab. It will NOT persist inside Claude's in-chat preview, which sandboxes and
-     blocks browser storage — open the downloaded file directly (or host it) to see it work. */
+  /* ---- persistence: saves uploads/edits in this browser so they survive a refresh ---- */
   var STORAGE_KEY = 'brushBeyondGalleryV1';
+  var saveWarned = false;
   function loadSavedState(){
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
@@ -641,23 +640,88 @@
       var current = loadSavedState();
       for (var k in partial){ if (Object.prototype.hasOwnProperty.call(partial, k)) current[k] = partial[k]; }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
-    } catch (e){ /* storage full, blocked, or unavailable — fail silently, in-memory still works */ }
+    } catch (e){
+      if (!saveWarned){
+        saveWarned = true;
+        window.alert('This change couldn\u2019t be saved (browser storage is full or blocked). Try a smaller image, or use \u201cReset to defaults\u201d to free space.');
+      }
+    }
   }
   var savedState = loadSavedState();
 
-  /* ---- owner mode: hides every add/replace/reset control from visitors -----
-     This is a static page with no server, so this is a deterrent for casual
-     visitors, not real security — anyone determined enough could still get
-     past it via the browser's dev tools. Default password is "brushbeyond";
-     change OWNER_PASSWORD_HASH below to your own SHA-256 hash to use a
-     different one. */
+  /* shrink big photos before saving so they fit in browser storage */
+  function compressImage(file, maxDim, quality){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onerror = reject;
+      reader.onload = function(){
+        var img = new Image();
+        img.onerror = function(){ resolve(reader.result); };
+        img.onload = function(){
+          var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          var w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+          var c = document.createElement('canvas'); c.width = w; c.height = h;
+          var ctx = c.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          try { resolve(c.toDataURL('image/jpeg', quality)); } catch (e){ resolve(reader.result); }
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /* ---- owner mode: hides every add/replace/remove/reset control from visitors -----
+     Default password is "brushbeyond". To use a different one, replace
+     OWNER_PASSWORD_HASH with the SHA-256 hash of your new password.
+     (This is a page-level lock for casual visitors, not server-grade security.) */
   var OWNER_STORAGE_KEY = 'brushBeyondIsOwner';
   var OWNER_PASSWORD_HASH = 'e319aa55eaddf2e0069730f4283161d923200f513d6482d47e417cd93649e951';
 
+  function sha256Sync(msg){
+    function rr(n, x){ return (x >>> n) | (x << (32 - n)); }
+    var K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+    var H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    var s = unescape(encodeURIComponent(msg)), l = s.length, words = [], i, o;
+    for (i = 0; i < l; i++) words[i >> 2] |= s.charCodeAt(i) << (24 - (i % 4) * 8);
+    words[l >> 2] |= 0x80 << (24 - (l % 4) * 8);
+    words[(((l + 8) >> 6) + 1) * 16 - 1] = l * 8;
+    for (o = 0; o < words.length; o += 16){
+      var w = [], a = H.slice();
+      for (i = 0; i < 64; i++){
+        if (i < 16) w[i] = words[o + i] | 0;
+        else {
+          var s0 = rr(7, w[i-15]) ^ rr(18, w[i-15]) ^ (w[i-15] >>> 3);
+          var s1 = rr(17, w[i-2]) ^ rr(19, w[i-2]) ^ (w[i-2] >>> 10);
+          w[i] = (w[i-16] + s0 + w[i-7] + s1) | 0;
+        }
+        var S1 = rr(6, a[4]) ^ rr(11, a[4]) ^ rr(25, a[4]);
+        var ch = (a[4] & a[5]) ^ (~a[4] & a[6]);
+        var t1 = (a[7] + S1 + ch + K[i] + w[i]) | 0;
+        var S0 = rr(2, a[0]) ^ rr(13, a[0]) ^ rr(22, a[0]);
+        var maj = (a[0] & a[1]) ^ (a[0] & a[2]) ^ (a[1] & a[2]);
+        var t2 = (S0 + maj) | 0;
+        a = [(t1 + t2) | 0, a[0], a[1], a[2], (a[3] + t1) | 0, a[4], a[5], a[6]];
+      }
+      for (i = 0; i < 8; i++) H[i] = (H[i] + a[i]) | 0;
+    }
+    return H.map(function(x){ return ('00000000' + (x >>> 0).toString(16)).slice(-8); }).join('');
+  }
+
   async function sha256Hex(text){
-    var enc = new TextEncoder().encode(text);
-    var buf = await crypto.subtle.digest('SHA-256', enc);
-    return Array.prototype.map.call(new Uint8Array(buf), function(b){ return ('00' + b.toString(16)).slice(-2); }).join('');
+    if (window.crypto && window.crypto.subtle){
+      var buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+      return Array.prototype.map.call(new Uint8Array(buf), function(b){ return ('00' + b.toString(16)).slice(-2); }).join('');
+    }
+    return sha256Sync(text);   /* plain-http hosting has no crypto.subtle */
   }
 
   function setOwnerMode(isOwner){
@@ -698,9 +762,7 @@
       if (!value){ errorEl.textContent = 'Enter your password.'; return; }
       var hash = await sha256Hex(value);
       if (hash === OWNER_PASSWORD_HASH){
-        try {
-          localStorage.setItem(OWNER_STORAGE_KEY, '1');
-        } catch(e){}
+        try { localStorage.setItem(OWNER_STORAGE_KEY, '1'); } catch(e){}
         setOwnerMode(true);
         closeOwnerModal();
       } else {
@@ -841,12 +903,11 @@
       portraitInput.addEventListener('change', function(){
         var file = portraitInput.files && portraitInput.files[0];
         if (!file) return;
-        var reader = new FileReader();
-        reader.onload = function(e){
-          card.style.background = 'center/cover no-repeat url(' + e.target.result + ')';
+        compressImage(file, 1400, 0.85).then(function(dataUrl){
+          card.style.background = 'center/cover no-repeat url(' + dataUrl + ')';
           saveState({ portraitBg: card.style.background });
-        };
-        reader.readAsDataURL(file);
+          portraitInput.value = '';
+        });
       });
     }
   })();
@@ -923,6 +984,7 @@
   var nextBtn = document.getElementById('carouselNext');
   var replaceBtn = document.getElementById('carouselReplace');
   var addBtn = document.getElementById('carouselAdd');
+  var removeBtn = document.getElementById('carouselRemove');
 
   var carouselInput = document.createElement('input');
   carouselInput.type = 'file'; carouselInput.accept = 'image/*'; carouselInput.style.display = 'none';
@@ -971,6 +1033,7 @@
     cardEls.forEach(function(card, i){ positionCard(card, relIndex(i)); });
 
     var active = artworks[activeIndex];
+    if (removeBtn) removeBtn.style.display = artworks.length > 1 ? '' : 'none';
     captionEl.style.opacity = '0';
     captionEl.style.transform = 'translateY(6px)';
     clearTimeout(captionTimer);
@@ -1022,9 +1085,8 @@
   carouselInput.addEventListener('change', function(){
     var file = carouselInput.files && carouselInput.files[0];
     if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function(e){
-      var bgValue = 'center/cover no-repeat url(' + e.target.result + ')';
+    compressImage(file, 1600, 0.85).then(function(dataUrl){
+      var bgValue = 'center/cover no-repeat url(' + dataUrl + ')';
       if (pendingMode === 'add'){
         askPieceDetails({ title:'Untitled', medium:'Oil on canvas, ' + new Date().getFullYear(), dims:'' }).then(function(result){
           if (!result) return;
@@ -1046,9 +1108,20 @@
           saveGallery();
         });
       }
-    };
-    reader.readAsDataURL(file);
+    });
   });
+
+  if (removeBtn){
+    removeBtn.addEventListener('click', function(){
+      if (artworks.length <= 1) return;
+      var current = artworks[activeIndex];
+      if (!window.confirm('Remove "' + current.t + '" from the gallery? This can\u2019t be undone.')) return;
+      artworks.splice(activeIndex, 1);
+      activeIndex = Math.min(activeIndex, artworks.length - 1);
+      buildCards();
+      saveGallery();
+    });
+  }
 
   buildCards();
 
@@ -1119,12 +1192,11 @@
       spotlightInput.addEventListener('change', function(){
         var file = spotlightInput.files && spotlightInput.files[0];
         if (!file) return;
-        var reader = new FileReader();
-        reader.onload = function(e){
-          spot.style.background = 'center/cover no-repeat url(' + e.target.result + ')';
+        compressImage(file, 1400, 0.85).then(function(dataUrl){
+          spot.style.background = 'center/cover no-repeat url(' + dataUrl + ')';
           saveState({ spotlightBg: spot.style.background });
-        };
-        reader.readAsDataURL(file);
+          spotlightInput.value = '';
+        });
       });
     }
   })();
